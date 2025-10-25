@@ -40,7 +40,9 @@ Diseñar el sistema backend responsable de autorizar o denegar transacciones de 
 
 ## Arquitectura de Alto Nivel
 
-![Arquitectura del Sistema](02-arquitectura-componentes.png)
+![Arquitectura del Sistema](./02-arquitectura-componentes.png)
+
+> **Nota**: Si las imágenes no se muestran en GitHub, asegúrate de que los archivos PNG estén en el directorio raíz del repositorio.
 
 ---
 
