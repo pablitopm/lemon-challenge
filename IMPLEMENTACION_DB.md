@@ -50,6 +50,19 @@
 **GSI:**
 - `account-cards`: PK=`account_id`, SK=`created_at`
 
+### **Tabla: outbox_events**
+**Clave de partición:** `event_id` (String - UUID)
+
+**Atributos principales:**
+- `event_type` (String) - "TxnAuthorized", "TxnCompleted", "TxnFailed"
+- `payload` (String) - JSON del evento
+- `status` (String) - "PENDING", "PUBLISHED", "FAILED", "DEAD_LETTER"
+- `retry_count` (Number)
+- `created_at`, `published_at` (String)
+
+**GSI:**
+- `status-events`: PK=`status`, SK=`created_at`
+
 ## Redis - Estructura de Claves
 
 ### **Cache de Tasas de Conversión**

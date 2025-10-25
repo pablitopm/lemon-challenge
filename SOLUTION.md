@@ -101,6 +101,14 @@ La solución propuesta utiliza un **patrón asíncrono híbrido** que permite cu
      │
      ▼
 ┌─────────────────────────────────────┐
+│ 0. Validar Idempotencia             │ < 2ms
+│    - Check idempotency_key en Redis │
+│    - Si existe: retornar cached     │
+│    - TTL: 24 horas                  │
+└────┬────────────────────────────────┘
+     │
+     ▼
+┌─────────────────────────────────────┐
 │ 1. Validar Request                  │ < 5ms
 └────┬────────────────────────────────┘
      │
@@ -149,12 +157,18 @@ La solución propuesta utiliza un **patrón asíncrono híbrido** que permite cu
      │─── SI ───────────────────────────┐
                                         ▼
                            ┌──────────────────────────────┐
-                           │ 6. Bloqueo de Fondos         │ < 100ms
-                           │    - DynamoDB UpdateItem     │
-                           │      reserved_balance = +amt │
-                           │      WHERE account_id = X    │
-                           │    - Conditional Write       │
-                           │    - Atomicidad garantizada  │
+                           │ 6. Transacción Atómica       │ < 100ms
+                           │    - DynamoDB Transactions   │
+                           │      BEGIN TRANSACTION       │
+                           │      UpdateItem accounts     │
+                           │        reserved_balance +=   │
+                           │        version++             │
+                           │      PutItem transactions    │
+                           │        status: AUTHORIZED    │
+                           │      PutItem outbox_events   │
+                           │        event: TxnAuthorized  │
+                           │      COMMIT TRANSACTION      │
+                           │    - Rollback automático     │
                            └──────┬───────────────────────┘
                                   │
                                   ▼
@@ -485,7 +499,12 @@ La solución propuesta utiliza un **patrón asíncrono híbrido** que permite cu
 
 ### Arquitectura de Datos
 
-El sistema utiliza una arquitectura híbrida optimizada para diferentes tipos de datos:
+El sistema utiliza una arquitectura híbrida optimizada para diferentes tipos de datos con tolerancia a fallos:
+
+**Estrategias de Fallback:**
+- **Cache Redis caído**: Fallback directo a DynamoDB (+50ms latencia aceptable)
+- **DynamoDB degradado**: Modo solo lectura, rechazar nuevas transacciones
+- **Circuit Breaker**: Para evitar cascada de fallos en dependencias
 
 #### **DynamoDB - Datos Críticos**
 - **Cuentas**: Balances en USDT, BTC, ETH con fondos reservados
@@ -679,6 +698,14 @@ El sistema utiliza una arquitectura híbrida optimizada para diferentes tipos de
 - **Errores**: Por tipo (DB, timeout, validación) y proveedor
 - **Cache**: Hit rate y misses por tipo de cache
 - **Cola**: Profundidad y duración de procesamiento por worker
+
+**SLOs y Alertas:**
+- **Disponibilidad**: 99.9% uptime
+- **Latencia**: p95 < 500ms para autorizaciones
+- **Error Rate**: < 1% de transacciones fallidas
+- **Cache Miss**: < 20% para tasas de conversión
+- **Tracing**: Distributed tracing con Jaeger para debugging
+- **Correlation ID**: Único por request para trazabilidad completa
 
 ### Logs Estructurados (JSON)
 
@@ -906,4 +933,5 @@ Esta arquitectura balancea los requerimientos de:
 5.   **Observabilidad:** Métricas, logs, traces completos
 
 El trade-off principal es la complejidad de manejo asíncrono vs la imposibilidad de cumplir el timeout con trading síncrono. La solución mitiga riesgos con bloqueo de fondos, reconciliación robusta y notificaciones al usuario.
+
 
