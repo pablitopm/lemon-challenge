@@ -2,7 +2,59 @@
 
 ## Diagrama de Secuencia: Flujo Completo de Autorización
 
-![Flujo de Autorización](./01-flujo-autorizacion.png)
+```mermaid
+sequenceDiagram
+    participant LEMON as LEMON Payment Network
+    participant API as API Gateway
+    participant Auth as Authorization Service
+    participant Redis as Redis Cache
+    participant DynamoDB as DynamoDB
+    participant NATS as NATS Queue
+    participant Worker as Trading Worker
+    participant Trading as External Trading API
+
+    LEMON->>API: POST /v1/authorizations<br/>{amount, card_id, account_id, transaction_id}
+    API->>Auth: Forward request
+    
+    Auth->>Redis: GET card:{card_id}
+    Redis-->>Auth: Card info (account_id, status, limits)
+    
+    Auth->>Redis: GET balance:{account_id}
+    Redis-->>Auth: Balance summary
+    
+    Auth->>Redis: GET rate:USDT:ARS
+    Redis-->>Auth: Exchange rate
+    
+    Auth->>Auth: Calculate amount in USDT<br/>Validate balance & limits
+    
+    Auth->>DynamoDB: UpdateItem accounts<br/>Conditional write: reserve funds
+    DynamoDB-->>Auth: Success/Failure
+    
+    alt Funds Reserved Successfully
+        Auth->>DynamoDB: PutItem transactions<br/>Status: AUTHORIZED
+        Auth->>NATS: Publish trading event
+        Auth->>Redis: SET idempotent:{txn_id}
+        Auth-->>API: HTTP 200 {authorized: true}
+        API-->>LEMON: HTTP 200 {authorized: true}
+        
+        Note over Worker: Asynchronous Processing
+        Worker->>NATS: Consume trading event
+        Worker->>Trading: POST /trade<br/>Convert user currency to USDT
+        Trading-->>Worker: Trade result
+        
+        alt Trade Successful
+            Worker->>DynamoDB: UpdateItem transactions<br/>Status: COMPLETED
+            Worker->>DynamoDB: UpdateItem accounts<br/>Release reserved funds
+        else Trade Failed
+            Worker->>DynamoDB: UpdateItem transactions<br/>Status: FAILED
+            Worker->>DynamoDB: UpdateItem accounts<br/>Release reserved funds
+        end
+        
+    else Insufficient Funds or Error
+        Auth-->>API: HTTP 402 {authorized: false, reason: "INSUFFICIENT_FUNDS"}
+        API-->>LEMON: HTTP 402 {authorized: false}
+    end
+```
 
 ---
 
