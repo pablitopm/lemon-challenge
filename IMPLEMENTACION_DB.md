@@ -38,309 +38,91 @@ idempotent:{txn_id}     → TTL: 24h
 ### **DynamoDB - Datos Críticos y Transaccionales**
 
 #### **Tabla: accounts**
-```yaml
-TableName: accounts
-PartitionKey: account_id (String)
-Attributes:
-  - account_id: String (PK)
-  - user_id: String
-  - balance_usdt: Number
-  - balance_btc: Number
-  - balance_eth: Number
-  - reserved_usdt: Number
-  - reserved_btc: Number
-  - reserved_eth: Number
-  - payment_currency: String
-  - status: String
-  - version: Number (para conditional writes)
-  - created_at: String (ISO timestamp)
-  - updated_at: String (ISO timestamp)
+**Estructura:**
+- Clave de partición: account_id (String)
+- Atributos principales: user_id, balances por moneda (USDT, BTC, ETH), fondos reservados por moneda, moneda de pago por defecto, estado de cuenta, versión para conditional writes, timestamps de creación y actualización
 
-# Conditional Write para bloqueo de fondos:
-# ConditionExpression: "version = :expected_version AND (balance_usdt - reserved_usdt) >= :amount"
-# UpdateExpression: "SET reserved_usdt = reserved_usdt + :amount, version = version + :inc"
-
-# GSI: user-accounts
-PartitionKey: user_id
-SortKey: created_at
-ProjectionType: ALL
-```
+**Operaciones críticas:**
+- Conditional Write para bloqueo de fondos: verificar versión y balance disponible, incrementar fondos reservados y versión
+- GSI user-accounts: particionado por user_id, ordenado por fecha de creación
 
 #### **Tabla: cards**
-```yaml
-TableName: cards
-PartitionKey: card_id (String)
-Attributes:
-  - card_id: String (PK)
-  - account_id: String
-  - card_number_hash: String # Hash del número completo (PCI-DSS)
-  - last_four: String
-  - cardholder_name: String
-  - expiry_date: String
-  - status: String # ACTIVE, BLOCKED, EXPIRED, CANCELLED
-  - daily_limit_usdt: Number
-  - monthly_limit_usdt: Number
-  - created_at: String
-  - updated_at: String
+**Estructura:**
+- Clave de partición: card_id (String)
+- Atributos principales: account_id, hash del número de tarjeta (PCI-DSS), últimos 4 dígitos, nombre del titular, fecha de expiración, estado (ACTIVE, BLOCKED, EXPIRED, CANCELLED), límites diarios y mensuales en USDT, timestamps
 
-# GSI: account-cards
-PartitionKey: account_id
-SortKey: created_at
-ProjectionType: ALL
-
-# GSI: status-cards
-PartitionKey: status
-SortKey: card_id
-ProjectionType: INCLUDE
-NonKeyAttributes: [account_id, last_four, expiry_date]
-```
+**Índices:**
+- GSI account-cards: particionado por account_id, ordenado por fecha de creación
+- GSI status-cards: particionado por status, ordenado por card_id, incluye atributos específicos
 
 #### **Tabla: transactions**
-```yaml
-TableName: transactions
-PartitionKey: transaction_id (String)
-Attributes:
-  - transaction_id: String (PK) # Del proveedor
-  - account_id: String
-  - card_id: String
-  - amount_ars: Number
-  - amount_usdt: Number
-  - exchange_rate_usdt_ars: Number
-  - user_currency: String
-  - amount_in_user_currency: Number
-  - exchange_rate_to_usdt: Number
-  - status: String # AUTHORIZED, TRADING, COMPLETED, FAILED, REVERSED
-  - trade_id: String
-  - trade_status: String
-  - trade_executed_at: String
-  - trade_error: String
-  - authorized_at: String
-  - completed_at: String
-  - reversed_at: String
-  - retry_count: Number
-  - last_retry_at: String
-  - metadata: Map # Merchant info, location, etc.
-  - created_at: String
-  - updated_at: String
+**Estructura:**
+- Clave de partición: transaction_id (String, del proveedor)
+- Atributos principales: account_id, card_id, montos en ARS/USDT, tasas de cambio, moneda del usuario, estado del ciclo de vida (AUTHORIZED, TRADING, COMPLETED, FAILED, REVERSED), información de trade (ID, estado, timestamps), contadores de reintento, metadatos del comercio, timestamps de eventos
 
-# GSI: account-transactions
-PartitionKey: account_id
-SortKey: created_at
-ProjectionType: ALL
-
-# GSI: status-transactions (para reconciliación)
-PartitionKey: status
-SortKey: created_at
-ProjectionType: INCLUDE
-NonKeyAttributes: [transaction_id, account_id, retry_count]
-
-# GSI: card-transactions
-PartitionKey: card_id
-SortKey: created_at
-ProjectionType: ALL
-```
+**Índices:**
+- GSI account-transactions: particionado por account_id, ordenado por fecha de creación
+- GSI status-transactions: particionado por status, ordenado por fecha de creación (para reconciliación)
+- GSI card-transactions: particionado por card_id, ordenado por fecha de creación
 
 ### **Redis - Cache de Alto Rendimiento**
 
 #### **Estructura de Cache**
-```redis
-# Información de tarjeta (TTL: 5 minutos)
-Key: "card:{card_id}"
-Value: {
-    "account_id": "acc_xyz",
-    "status": "ACTIVE",
-    "daily_limit": "10000.00",
-    "daily_spent": "2500.00",
-    "last_four": "1234",
-    "expiry_date": "2026-12-31"
-}
-
-# Tasas de conversión (TTL diferenciado por volatilidad)
-Key: "rate:USDT:ARS"
-Value: "1050.50"
-TTL: 30 segundos
-
-Key: "rate:BTC:USDT"
-Value: "67500.00"
-TTL: 5 segundos
-
-Key: "rate:ETH:USDT"
-Value: "3200.00"
-TTL: 5 segundos
-
-# Rate limiting (TTL: 60 segundos)
-Key: "ratelimit:auth:{account_id}"
-Value: "5" # Contador de solicitudes
-Expire: 60 segundos
-
-# Idempotencia (TTL: 24 horas)
-Key: "idempotent:{transaction_id}"
-Value: {
-    "status": "AUTHORIZED",
-    "response": {...}
-}
-
-# Cache de balances (TTL: 10 segundos) - Solo para consultas frecuentes
-Key: "balance_summary:{account_id}"
-Value: {
-    "total_usdt_equivalent": "1500.25",
-    "payment_currency": "USDT",
-    "last_updated": 1729505000
-}
-```
+**Claves principales:**
+- `card:{card_id}`: Información de tarjeta (TTL: 5 minutos) - account_id, estado, límites diarios, gasto diario, últimos 4 dígitos, fecha de expiración
+- `rate:USDT:ARS`: Tasa de conversión estable (TTL: 30 segundos) - valor numérico
+- `rate:BTC:USDT`: Tasa de conversión volátil (TTL: 5 segundos) - valor numérico
+- `rate:ETH:USDT`: Tasa de conversión muy volátil (TTL: 5 segundos) - valor numérico
+- `ratelimit:auth:{account_id}`: Rate limiting por cuenta (TTL: 60 segundos) - contador de solicitudes
+- `idempotent:{transaction_id}`: Idempotencia (TTL: 24 horas) - estado y respuesta de transacción
+- `balance_summary:{account_id}`: Resumen de balance (TTL: 10 segundos) - equivalente total en USDT, moneda de pago, timestamp de actualización
 
 ### **TimescaleDB - Métricas de Negocio**
 
 #### **Tabla: exchange_rates**
-```sql
-CREATE TABLE exchange_rates (
-    from_currency VARCHAR(10) NOT NULL,
-    to_currency VARCHAR(10) NOT NULL,
-    rate DECIMAL(20,8) NOT NULL,
-    source VARCHAR(50) NOT NULL, -- BINANCE, KRAKEN, etc.
-    valid_from TIMESTAMPTZ NOT NULL,
-    valid_until TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Convertir a hypertable para optimización de time-series
-SELECT create_hypertable('exchange_rates', 'valid_from');
-
--- Índices para consultas eficientes
-CREATE INDEX idx_exchange_rates_currency_pair ON exchange_rates (from_currency, to_currency, valid_from DESC);
-CREATE INDEX idx_exchange_rates_source ON exchange_rates (source, valid_from DESC);
-```
+**Estructura:**
+- Campos principales: from_currency, to_currency, rate, source (BINANCE, KRAKEN, etc.), valid_from, valid_until, created_at
+- Optimización: Hypertable para time-series con particionamiento por valid_from
+- Índices: Por par de monedas y fecha, por fuente y fecha
 
 #### **Tabla: balance_ledger (Event Sourcing)**
-```sql
-CREATE TABLE balance_ledger (
-    account_id VARCHAR(50) NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL,
-    transaction_id VARCHAR(100) NOT NULL,
-    currency VARCHAR(10) NOT NULL,
-    amount_delta DECIMAL(20,8) NOT NULL, -- Puede ser negativo
-    balance_before DECIMAL(20,8) NOT NULL,
-    balance_after DECIMAL(20,8) NOT NULL,
-    operation_type VARCHAR(50) NOT NULL, -- DEPOSIT, WITHDRAWAL, PURCHASE, REFUND, RESERVE, RELEASE_RESERVE, TRADE_IN, TRADE_OUT
-    description TEXT,
-    metadata JSONB
-);
-
--- Convertir a hypertable
-SELECT create_hypertable('balance_ledger', 'created_at');
-
--- Índices para consultas eficientes
-CREATE INDEX idx_balance_ledger_account ON balance_ledger (account_id, created_at DESC);
-CREATE INDEX idx_balance_ledger_transaction ON balance_ledger (transaction_id);
-CREATE INDEX idx_balance_ledger_operation ON balance_ledger (operation_type, created_at DESC);
-```
+**Estructura:**
+- Campos principales: account_id, created_at, transaction_id, currency, amount_delta (puede ser negativo), balance_before, balance_after, operation_type (DEPOSIT, WITHDRAWAL, PURCHASE, REFUND, RESERVE, RELEASE_RESERVE, TRADE_IN, TRADE_OUT), description, metadata
+- Optimización: Hypertable para time-series con particionamiento por created_at
+- Índices: Por account_id y fecha, por transaction_id, por operation_type y fecha
 
 ## Operaciones Críticas
 
 ### **Bloqueo de Fondos (DynamoDB)**
 
 #### **Operación Atómica**
-```python
-def reserve_funds(account_id: str, amount: Decimal, expected_version: int) -> bool:
-    """
-    Bloquea fondos de manera atómica usando conditional writes
-    """
-    try:
-        response = dynamodb.update_item(
-            TableName='accounts',
-            Key={'account_id': {'S': account_id}},
-            ConditionExpression='version = :expected_version AND (balance_usdt - reserved_usdt) >= :amount',
-            UpdateExpression='SET reserved_usdt = reserved_usdt + :amount, version = version + :inc',
-            ExpressionAttributeValues={
-                ':expected_version': {'N': str(expected_version)},
-                ':amount': {'N': str(amount)},
-                ':inc': {'N': '1'}
-            },
-            ReturnValues='UPDATED_NEW'
-        )
-        return True
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
-            return False  # Race condition o fondos insuficientes
-        raise
-```
+**Funcionalidad:**
+- Bloquea fondos de manera atómica usando conditional writes de DynamoDB
+- Verifica versión esperada y balance disponible en una sola operación
+- Incrementa fondos reservados y versión si las condiciones se cumplen
+- Retorna False si hay race condition o fondos insuficientes
 
 #### **Liberación de Fondos**
-```python
-def release_funds(account_id: str, amount: Decimal, expected_version: int) -> bool:
-    """
-    Libera fondos reservados de manera atómica
-    """
-    try:
-        response = dynamodb.update_item(
-            TableName='accounts',
-            Key={'account_id': {'S': account_id}},
-            ConditionExpression='version = :expected_version AND reserved_usdt >= :amount',
-            UpdateExpression='SET reserved_usdt = reserved_usdt - :amount, version = version + :inc',
-            ExpressionAttributeValues={
-                ':expected_version': {'N': str(expected_version)},
-                ':amount': {'N': str(amount)},
-                ':inc': {'N': '1'}
-            }
-        )
-        return True
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
-            return False
-        raise
-```
+**Funcionalidad:**
+- Libera fondos reservados de manera atómica usando conditional writes
+- Verifica versión esperada y fondos reservados disponibles
+- Decrementa fondos reservados y incrementa versión si las condiciones se cumplen
+- Retorna False si hay race condition
 
 ### **Cache de Tasas de Conversión (Redis)**
 
 #### **Configuración Diferenciada por Volatilidad**
-```python
-class ExchangeRateCache:
-    def __init__(self):
-        self.cache_configs = {
-            "USDT-ARS": {
-                "redis_ttl": 30,  # segundos
-                "memory_ttl": 10,  # segundos
-                "max_drift": 0.5,  # 0.5%
-            },
-            "BTC-USDT": {
-                "redis_ttl": 5,   # segundos
-                "memory_ttl": 2,   # segundos
-                "max_drift": 2.0,  # 2%
-            },
-            "ETH-USDT": {
-                "redis_ttl": 5,   # segundos
-                "memory_ttl": 2,   # segundos
-                "max_drift": 2.5,  # 2.5%
-            },
-        }
-    
-    def get_rate(self, from_currency: str, to_currency: str) -> Decimal:
-        pair = f"{from_currency}-{to_currency}"
-        config = self.cache_configs.get(pair)
-        
-        if not config:
-            return self._get_rate_from_api(from_currency, to_currency)
-        
-        # L1: In-memory cache
-        cached = self.mem_cache.get(pair)
-        if cached and self._validate_drift(cached, config["max_drift"]):
-            return cached.rate
-        
-        # L2: Redis cache
-        cached = self.redis.get(f"rate:{pair}")
-        if cached and self._validate_drift(cached, config["max_drift"]):
-            self.mem_cache.set(pair, cached, config["memory_ttl"])
-            return cached.rate
-        
-        # L3: API en tiempo real
-        rate = self._get_rate_from_api(from_currency, to_currency)
-        
-        # Cachear con TTL apropiado
-        self.redis.setex(f"rate:{pair}", config["redis_ttl"], rate)
-        self.mem_cache.set(pair, rate, config["memory_ttl"])
-        
-        return rate
-```
+**Estrategia de cache multi-nivel:**
+- **USDT-ARS**: TTL Redis 30s, TTL memoria 10s, drift máximo 0.5% (estable)
+- **BTC-USDT**: TTL Redis 5s, TTL memoria 2s, drift máximo 2.0% (volátil)
+- **ETH-USDT**: TTL Redis 5s, TTL memoria 2s, drift máximo 2.5% (muy volátil)
+
+**Flujo de cache:**
+1. L1: Cache en memoria (más rápido)
+2. L2: Cache en Redis (persistente)
+3. L3: API en tiempo real (fallback)
+4. Validación de drift antes de usar cache
+5. Cachear con TTL apropiado según volatilidad
 
 ### **Event Sourcing (TimescaleDB)**
 

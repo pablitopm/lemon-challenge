@@ -4,7 +4,7 @@
 
 Diseñar el sistema backend responsable de autorizar o denegar transacciones de pago en tiempo real para una tarjeta prepaga fondeada con criptomonedas (USDT, BTC, ETH).
 
-**Constraint crítico:** Responder en máximo 2 segundos, mientras el proveedor de trading externo tiene p95 de 3 segundos.
+**Constraint crítico:** Responder en máximo 2 segundos a LEMON, mientras el proveedor de trading externo tiene p95 de 3 segundos.
 
 ---
 
@@ -19,7 +19,7 @@ Diseñar el sistema backend responsable de autorizar o denegar transacciones de 
 │ 1. Validar tarjeta y cuenta                                │
 │ 2. Verificar balance disponible                            │
 │ 3. Bloquear fondos (reserved_balance)                      │
-│ 4. Responder HTTP 200   o 402                            │
+│ 4. Responder HTTP 200   o 402                              │
 └────────────────────────────────────────────────────────────┘
                          │
                          ▼
@@ -28,11 +28,11 @@ Diseñar el sistema backend responsable de autorizar o denegar transacciones de 
 │ ---------------------------------------------------------- │
 │ Si moneda = USDT:                                          │
 │   → Completar inmediatamente                               │
-│                                                             │
+│                                                            │
 │ Si moneda = BTC/ETH:                                       │
 │   → Ejecutar trade con proveedor externo                   │
-│   → Retry con backoff exponencial (3 intentos)            │
-│   → Si falla: Proceder con trade a pérdida                │
+│   → Retry con backoff exponencial (3 intentos)             │
+│   → Si falla: Proceder con trade a pérdida                 │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -40,40 +40,7 @@ Diseñar el sistema backend responsable de autorizar o denegar transacciones de 
 
 ## Arquitectura de Alto Nivel
 
-```
-Payment Proveedor
-      │
-      ▼
-┌─────────────────┐
-│ API Gateway     │  Rate Limiting + Auth
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐       ┌──────────────┐
-│ Authorization   │◄─────►│ Redis Cache  │
-│ Servicio (Go)    │       │ (Balances,   │
-│ 4 pods          │       │  Tasas)      │
-└────────┬────────┘       └──────────────┘
-         │                        │
-         │                        ▼
-         │                ┌──────────────┐
-         │                │ DynamoDB     │
-         │                │ (Balances,   │
-         │                │  Transacc.)  │
-         │                └──────────────┘
-         ▼
-┌─────────────────┐
-│ NATS JetStream  │
-│ Mensaje Cola   │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐       ┌──────────────┐
-│ Trading Trabajador  │◄─────►│ External     │
-│ (Go)            │       │ Trading API  │
-│ 6 pods          │       │ (p95: 3s)    │
-└─────────────────┘       └──────────────┘
-```
+![Arquitectura del Sistema](02-arquitectura-componentes.png)
 
 ---
 

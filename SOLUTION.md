@@ -15,11 +15,11 @@
 
 ## Resumen
 
-La solución propuesta utiliza un **patrón asíncrono híbrido** que permite cumplir con la restricción de 2 segundos del proveedor de pagos, mientras se integra con un servicio de trading que tiene latencias de hasta 3 segundos.
+La solución propuesta utiliza un **patrón asíncrono híbrido** que permite cumplir con la restricción de 2 segundos de LEMON, mientras se integra con un servicio de trading que tiene latencias de hasta 3 segundos.
 
 ### Estrategia Principal: Pre-autorización + Procesamiento Asíncrono
 
-1. **Autorización inmediata** (< 500ms): Validar fondos y responder al proveedor
+1. **Autorización inmediata** (< 500ms): Validar fondos y responder a LEMON
 2. **Trading asíncrono** (segundo plano): Ejecutar conversión de criptomonedas si es necesario
 3. **Reconciliación** (post-autorización): Confirmar o revertir transacciones fallidas
 
@@ -31,7 +31,7 @@ La solución propuesta utiliza un **patrón asíncrono híbrido** que permite cu
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Payment Network Proveedor                │
+│                    LEMON Payment Network                    │
 └────────────────────────┬────────────────────────────────────┘
                          │ POST /v1/authorizations (2s timeout)
                          ▼
@@ -819,7 +819,7 @@ DynamoDB se eligió por:
 ### **¿Cómo se maneja el timeout de 2 segundos con trading de 3 segundos?**
 
 Se implementa un **patrón asíncrono híbrido**:
-1. **Fase síncrona (< 500ms)**: Validar fondos, bloquear saldo, responder al proveedor
+1. **Fase síncrona (< 500ms)**: Validar fondos, bloquear saldo, responder a LEMON
 2. **Fase asíncrona (background)**: Ejecutar trade con proveedor externo
 3. **Reconciliación**: Confirmar o revertir transacciones fallidas
 
